@@ -24,12 +24,12 @@ interface RawPosition {
   currency: string | null;
 }
 
-function toUsd(amount: number, currency: string, rates: ExchangeRates): number {
+function toGbp(amount: number, currency: string, rates: ExchangeRates): number {
   switch (currency) {
-    case 'EUR': return amount * rates.EUR;
-    case 'GBP': return amount * rates.GBP;
-    case 'GBX': return (amount / 100) * rates.GBP; // pence → GBP → USD
-    default: return amount; // USD
+    case 'EUR': return (amount * rates.EUR) / rates.GBP; // EUR → USD → GBP
+    case 'GBP': return amount;
+    case 'GBX': return amount / 100; // pence → GBP
+    default: return amount / rates.GBP; // USD → GBP
   }
 }
 
@@ -124,16 +124,16 @@ export default async function DashboardPage() {
         ? ((current - weekAgo) / weekAgo) * 100 * dirMultiplier
         : null;
 
-    // USD-converted values for totals and P&L $ display
-    const marketValueUsd = marketValue !== null ? toUsd(marketValue, currency, rates) : null;
-    const costBasisUsd = toUsd(costBasis, currency, rates);
-    const totalPnlAbsUsd = totalPnlAbs !== null ? toUsd(totalPnlAbs, currency, rates) : null;
-    const dailyPnlAbsUsd = dailyPnlAbs !== null ? toUsd(dailyPnlAbs, currency, rates) : null;
-    const weeklyPnlAbsUsd = weeklyPnlAbs !== null ? toUsd(weeklyPnlAbs, currency, rates) : null;
+    // GBP-converted values for totals and P&L display
+    const marketValueUsd = marketValue !== null ? toGbp(marketValue, currency, rates) : null;
+    const costBasisUsd = toGbp(costBasis, currency, rates);
+    const totalPnlAbsUsd = totalPnlAbs !== null ? toGbp(totalPnlAbs, currency, rates) : null;
+    const dailyPnlAbsUsd = dailyPnlAbs !== null ? toGbp(dailyPnlAbs, currency, rates) : null;
+    const weeklyPnlAbsUsd = weeklyPnlAbs !== null ? toGbp(weeklyPnlAbs, currency, rates) : null;
     const prevValueUsd =
-      prevClose !== null ? toUsd(prevClose * qty * contractMultiplier, currency, rates) : null;
+      prevClose !== null ? toGbp(prevClose * qty * contractMultiplier, currency, rates) : null;
     const weekValueUsd =
-      weekAgo !== null ? toUsd(weekAgo * qty * contractMultiplier, currency, rates) : null;
+      weekAgo !== null ? toGbp(weekAgo * qty * contractMultiplier, currency, rates) : null;
 
     // Normalize expiry_date: DB may return a Date object or ISO string
     let expiryDate: string | null = null;

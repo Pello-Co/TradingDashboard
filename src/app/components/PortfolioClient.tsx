@@ -21,20 +21,20 @@ export interface EnrichedPosition {
   prevClose: number | null;
   weekAgo: number | null;
   marketValue: number | null;       // native currency (GBX = pence)
-  marketValueUsd: number | null;    // USD for totals/sorting
+  marketValueUsd: number | null;    // GBP for totals/sorting
   costBasis: number;                // native currency
-  costBasisUsd: number;             // USD for totals
+  costBasisUsd: number;             // GBP for totals
   totalPnlAbs: number | null;       // native currency
   totalPnlPct: number | null;
-  totalPnlAbsUsd: number | null;    // USD for display
+  totalPnlAbsUsd: number | null;    // GBP for display
   dailyPnlAbs: number | null;       // native currency
   dailyPnlPct: number | null;
-  dailyPnlAbsUsd: number | null;    // USD for display
+  dailyPnlAbsUsd: number | null;    // GBP for display
   weeklyPnlAbs: number | null;      // native currency
   weeklyPnlPct: number | null;
-  weeklyPnlAbsUsd: number | null;   // USD for display
-  prevValueUsd: number | null;      // USD prev close value for daily % summary
-  weekValueUsd: number | null;      // USD week-ago value for weekly % summary
+  weeklyPnlAbsUsd: number | null;   // GBP for display
+  prevValueUsd: number | null;      // GBP prev close value for daily % summary
+  weekValueUsd: number | null;      // GBP week-ago value for weekly % summary
 }
 
 type SortKey = 'ticker' | 'marketValue' | 'totalPnlPct' | 'dailyPnlPct' | 'weeklyPnlPct';
@@ -104,7 +104,7 @@ function pnlSign(n: number | null) {
 
 function fmtPnlAbs(n: number | null) {
   if (n === null) return '—';
-  return `${pnlSign(n)}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${pnlSign(n)}£${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function fmtPnlPct(n: number | null) {
@@ -169,11 +169,11 @@ const HEADERS: { label: string; sortKey?: SortKey }[] = [
   { label: 'Current' },
   { label: 'Qty' },
   { label: 'Mkt Value', sortKey: 'marketValue' },
-  { label: 'P&L $' },
+  { label: 'P&L £' },
   { label: 'P&L %', sortKey: 'totalPnlPct' },
-  { label: 'Day $' },
+  { label: 'Day £' },
   { label: 'Day %', sortKey: 'dailyPnlPct' },
-  { label: 'Wk $' },
+  { label: 'Wk £' },
   { label: 'Wk %', sortKey: 'weeklyPnlPct' },
 ];
 
@@ -245,28 +245,28 @@ export default function PortfolioClient({
 
   return (
     <>
-      {/* Summary Bar — all USD */}
+      {/* Summary Bar — all GBP */}
       <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryCard
           label="Portfolio Value"
-          value={`$${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`£${totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           neutral
         />
         <SummaryCard
           label="Total P&L"
-          value={`${pnlSign(totalPnlAbs)}$${Math.abs(totalPnlAbs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`${pnlSign(totalPnlAbs)}£${Math.abs(totalPnlAbs).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           sub={`${pnlSign(totalPnlPct)}${fmt(totalPnlPct)}%`}
           positive={totalPnlAbs >= 0}
         />
         <SummaryCard
           label="Daily P&L"
-          value={`${pnlSign(totalDailyPnl)}$${Math.abs(totalDailyPnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`${pnlSign(totalDailyPnl)}£${Math.abs(totalDailyPnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           sub={`${pnlSign(totalDailyPct)}${fmt(totalDailyPct)}%`}
           positive={totalDailyPnl >= 0}
         />
         <SummaryCard
           label="Weekly P&L"
-          value={`${pnlSign(totalWeeklyPnl)}$${Math.abs(totalWeeklyPnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`${pnlSign(totalWeeklyPnl)}£${Math.abs(totalWeeklyPnl).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           sub={`${pnlSign(totalWeeklyPct)}${fmt(totalWeeklyPct)}%`}
           positive={totalWeeklyPnl >= 0}
         />
