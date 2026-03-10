@@ -63,10 +63,18 @@ export default async function DashboardPage() {
 
   const yahooTickers = rows.map((r) => r.yahoo_ticker);
 
-  const [quotes, weeklyChanges] = await Promise.all([
-    fetchQuotes(yahooTickers),
-    fetchWeeklyChange(yahooTickers),
-  ]);
+  let quotes = new Map<string, import('@/lib/prices').QuoteResult>();
+  let weeklyChanges = new Map<string, import('@/lib/prices').WeeklyChangeResult>();
+
+  try {
+    [quotes, weeklyChanges] = await Promise.all([
+      fetchQuotes(yahooTickers),
+      fetchWeeklyChange(yahooTickers),
+    ]);
+  } catch {
+    // If price fetching fails entirely, render with empty prices
+    console.error('Failed to fetch prices from Yahoo Finance');
+  }
 
   // Enrich each position with calculated data
   const positions = rows.map((pos: Position) => {
