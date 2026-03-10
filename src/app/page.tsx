@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 
-import { sql } from '@/lib/db';
+import { sql, dbError } from '@/lib/db';
 import { fetchQuotes, fetchWeeklyChange } from '@/lib/prices';
 
 interface Position {
@@ -54,6 +54,18 @@ function pnlSign(n: number | null) {
 }
 
 export default async function DashboardPage() {
+  if (!sql) {
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-400 mb-2">Config Error</h1>
+          <p className="text-gray-400">{dbError || 'DATABASE_URL not configured'}</p>
+          <p className="text-gray-600 text-xs mt-2">VERCEL_ENV: {process.env.VERCEL_ENV ?? 'not set'} | NODE_ENV: {process.env.NODE_ENV ?? 'not set'}</p>
+        </div>
+      </div>
+    );
+  }
+
   let rows: Position[] = [];
   try {
     rows = (await sql`
@@ -68,7 +80,7 @@ export default async function DashboardPage() {
       <div className="min-h-screen bg-gray-950 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-red-400 mb-2">Database Error</h1>
-          <p className="text-gray-400">Could not connect to the database. Check DATABASE_URL.</p>
+          <p className="text-gray-400">Query failed: {e instanceof Error ? e.message : 'Unknown error'}</p>
         </div>
       </div>
     );
