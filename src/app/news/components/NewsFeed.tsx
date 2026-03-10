@@ -21,14 +21,20 @@ function SentimentBadge({
   sentiment: NewsArticle['sentiment'];
   confidence: string | null;
 }) {
-  if (!sentiment) return null;
+  if (!sentiment) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium bg-gray-800 text-gray-500 border border-gray-700">
+        Pending
+      </span>
+    );
+  }
 
   const pct = confidence ? Math.round(parseFloat(confidence) * 100) : null;
 
   const styles: Record<string, string> = {
-    bullish: 'bg-emerald-400/15 text-emerald-400 border border-emerald-400/30',
-    bearish: 'bg-red-400/15 text-red-400 border border-red-400/30',
-    neutral: 'bg-gray-700/50 text-gray-400 border border-gray-600/50',
+    bullish: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40',
+    bearish: 'bg-red-500/20 text-red-300 border border-red-500/40',
+    neutral: 'bg-gray-700 text-gray-300 border border-gray-600',
   };
 
   const labels: Record<string, string> = {
@@ -44,10 +50,10 @@ function SentimentBadge({
   };
 
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[sentiment]}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${dots[sentiment]}`} />
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${styles[sentiment]}`}>
+      <span className={`h-2 w-2 rounded-full ${dots[sentiment]}`} />
       {labels[sentiment]}
-      {pct !== null && <span className="opacity-70">{pct}%</span>}
+      {pct !== null && <span className="font-normal opacity-80">{pct}%</span>}
     </span>
   );
 }
@@ -115,25 +121,40 @@ function NewsCard({ article }: { article: NewsArticle }) {
   );
 }
 
+type SentimentFilter = 'all' | 'bullish' | 'bearish' | 'neutral';
+
+const SENTIMENT_FILTERS: { value: SentimentFilter; label: string; activeClass: string }[] = [
+  { value: 'all', label: 'All', activeClass: 'bg-emerald-400/20 text-emerald-400 border border-emerald-400/40' },
+  { value: 'bullish', label: 'Bullish', activeClass: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' },
+  { value: 'bearish', label: 'Bearish', activeClass: 'bg-red-500/20 text-red-300 border border-red-500/40' },
+  { value: 'neutral', label: 'Neutral', activeClass: 'bg-gray-700 text-gray-300 border border-gray-600' },
+];
+
+const INACTIVE_PILL = 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600';
+
 export default function NewsFeed({ articles }: { articles: NewsArticle[] }) {
   // Collect unique tickers
   const tickers = Array.from(new Set(articles.map((a) => a.ticker))).sort();
   const [activeTicker, setActiveTicker] = useState<string>('all');
+  const [activeSentiment, setActiveSentiment] = useState<SentimentFilter>('all');
 
-  const filtered =
-    activeTicker === 'all' ? articles : articles.filter((a) => a.ticker === activeTicker);
+  const filtered = articles.filter((a) => {
+    const tickerMatch = activeTicker === 'all' || a.ticker === activeTicker;
+    const sentimentMatch = activeSentiment === 'all' || a.sentiment === activeSentiment;
+    return tickerMatch && sentimentMatch;
+  });
 
   return (
     <div>
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      {/* Ticker filter */}
+      <div className="flex flex-wrap gap-2 mb-3">
         <button
           onClick={() => setActiveTicker('all')}
           className={[
             'rounded-full px-3 py-1 text-xs font-medium transition-colors',
             activeTicker === 'all'
               ? 'bg-emerald-400/20 text-emerald-400 border border-emerald-400/40'
-              : 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600',
+              : INACTIVE_PILL,
           ].join(' ')}
         >
           All
@@ -146,10 +167,26 @@ export default function NewsFeed({ articles }: { articles: NewsArticle[] }) {
               'rounded-full px-3 py-1 text-xs font-medium font-mono transition-colors',
               activeTicker === ticker
                 ? 'bg-emerald-400/20 text-emerald-400 border border-emerald-400/40'
-                : 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600',
+                : INACTIVE_PILL,
             ].join(' ')}
           >
             {ticker}
+          </button>
+        ))}
+      </div>
+
+      {/* Sentiment filter */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {SENTIMENT_FILTERS.map(({ value, label, activeClass }) => (
+          <button
+            key={value}
+            onClick={() => setActiveSentiment(value)}
+            className={[
+              'rounded-full px-3 py-1 text-xs font-medium transition-colors',
+              activeSentiment === value ? activeClass : INACTIVE_PILL,
+            ].join(' ')}
+          >
+            {label}
           </button>
         ))}
       </div>
