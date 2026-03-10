@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { sql, dbError } from '@/lib/db';
 import { fetchQuotes, fetchWeeklyChange, fetchExchangeRates, ExchangeRates } from '@/lib/prices';
 import PortfolioClient, { EnrichedPosition } from '@/app/components/PortfolioClient';
+import TabNav from '@/app/components/TabNav';
 
 interface RawPosition {
   id: number;
@@ -200,6 +201,8 @@ export default async function DashboardPage() {
           <span className="text-xs text-gray-500">Updated {updatedAt}</span>
         </div>
       </header>
+
+      <TabNav />
 
       <main className="px-4 py-6 sm:px-6">
         <PortfolioClient positions={positions} updatedAt={updatedAt} />
