@@ -3,7 +3,6 @@ export interface SentimentResult {
   confidence: number | null;
   summary: string | null;
   impact: string | null;
-  relevance: number | null;
   tags: string[] | null;
   inputTokens: number;
   outputTokens: number;
@@ -17,7 +16,7 @@ export interface ArticleSummaryInput {
 
 export interface TickerSummaryResult {
   overall_summary: string | null;
-  recommendation: 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell' | null;
+  recommendation: 'buy' | 'hold' | 'sell' | null;
   risks: string | null;
   catalysts: string | null;
   inputTokens: number;
@@ -40,7 +39,7 @@ export async function analyseArticle(
 
   if (!apiKey) {
     console.info('[sentiment] OPENAI_KEY not set — skipping analysis');
-    return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null, inputTokens: 0, outputTokens: 0 };
+    return { sentiment: null, confidence: null, summary: null, impact: null, tags: null, inputTokens: 0, outputTokens: 0 };
   }
 
   const systemPrompt =
@@ -49,7 +48,7 @@ export async function analyseArticle(
   const userPrompt =
     `Analyse this headline for ${ticker} (${companyName}):\n\n"${articleTitle}"\n\n` +
     `Respond with this exact JSON structure:\n` +
-    `{"sentiment": "bullish" or "bearish" or "neutral", "confidence": 0.0-1.0, "summary": "one sentence summary of the news", "impact": "one sentence on why this matters for the stock", "relevance": 0.0-1.0 how relevant this is to the stock specifically, "tags": ["array", "of", "topic", "tags"]}`;
+    `{"sentiment": "bullish" or "bearish" or "neutral", "confidence": 0.0-1.0, "summary": "one sentence summary of the news", "impact": "one sentence on why this matters for the stock", "tags": ["array", "of", "topic", "tags"]}`;
 
   let responseText: string;
   let inputTokens = 0;
@@ -76,7 +75,7 @@ export async function analyseArticle(
     if (!res.ok) {
       const body = await res.text().catch(() => '');
       console.warn(`[sentiment] OpenAI API error ${res.status}:`, body.slice(0, 200));
-      return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null, inputTokens: 0, outputTokens: 0 };
+      return { sentiment: null, confidence: null, summary: null, impact: null, tags: null, inputTokens: 0, outputTokens: 0 };
     }
 
     const data = await res.json() as {
@@ -88,7 +87,7 @@ export async function analyseArticle(
     outputTokens = data?.usage?.completion_tokens ?? 0;
   } catch (e) {
     console.warn('[sentiment] OpenAI fetch error:', e instanceof Error ? e.message : e);
-    return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null, inputTokens: 0, outputTokens: 0 };
+    return { sentiment: null, confidence: null, summary: null, impact: null, tags: null, inputTokens: 0, outputTokens: 0 };
   }
 
   // Strip markdown code fences if present
@@ -109,19 +108,14 @@ export async function analyseArticle(
     const summary = typeof parsed.summary === 'string' ? parsed.summary : null;
     const impact = typeof parsed.impact === 'string' ? parsed.impact : null;
 
-    const relevance =
-      typeof parsed.relevance === 'number' && parsed.relevance >= 0 && parsed.relevance <= 1
-        ? parsed.relevance
-        : null;
-
     const tags = Array.isArray(parsed.tags)
       ? (parsed.tags as unknown[]).filter((t): t is string => typeof t === 'string')
       : null;
 
-    return { sentiment, confidence, summary, impact, relevance, tags, inputTokens, outputTokens };
+    return { sentiment, confidence, summary, impact, tags, inputTokens, outputTokens };
   } catch (e) {
     console.warn('[sentiment] Failed to parse response:', responseText.slice(0, 200), e);
-    return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null, inputTokens, outputTokens };
+    return { sentiment: null, confidence: null, summary: null, impact: null, tags: null, inputTokens, outputTokens };
   }
 }
 
@@ -152,12 +146,12 @@ export async function generateTickerSummary(
   const userPrompt =
     `You are a financial analyst. Given these news summaries about ${ticker} (${companyName}), provide:\n` +
     `1. An overall summary (2-3 sentences) of the news landscape\n` +
-    `2. A recommendation: Strong Buy, Buy, Hold, Sell, or Strong Sell\n` +
+    `2. A recommendation: buy, hold, or sell\n` +
     `3. Key risks (1 sentence)\n` +
     `4. Key catalysts (1 sentence)\n\n` +
     `News summaries:\n${articleLines}\n\n` +
     `Respond with ONLY valid JSON:\n` +
-    `{"overall_summary": "...", "recommendation": "Strong Buy|Buy|Hold|Sell|Strong Sell", "risks": "...", "catalysts": "..."}`;
+    `{"overall_summary": "...", "recommendation": "buy" or "hold" or "sell", "risks": "...", "catalysts": "..."}`;
 
   let responseText: string;
   let inputTokens = 0;
@@ -201,9 +195,9 @@ export async function generateTickerSummary(
   try {
     const parsed = JSON.parse(cleaned) as Record<string, unknown>;
 
-    const validRecommendations = ['Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell'];
-    const recommendation = validRecommendations.includes(String(parsed.recommendation))
-      ? (parsed.recommendation as TickerSummaryResult['recommendation'])
+    const validRecommendations = ['buy', 'hold', 'sell'];
+    const recommendation = validRecommendations.includes(String(parsed.recommendation).toLowerCase())
+      ? (String(parsed.recommendation).toLowerCase() as TickerSummaryResult['recommendation'])
       : null;
 
     return {

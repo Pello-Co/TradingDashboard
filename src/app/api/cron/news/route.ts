@@ -5,9 +5,8 @@ import { analyseArticle, generateTickerSummary, ArticleSummaryInput, sleep } fro
 
 interface PositionRow {
   ticker: string;
-  name: string | null;
+  display_name: string | null;
   asset_type: string;
-  underlying_ticker: string | null;
 }
 
 interface TickerInfo {
@@ -29,29 +28,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'DATABASE_URL not configured' }, { status: 500 });
   }
 
-  // 1. Fetch all open positions
+  // 1. Fetch all open positions (superuser connection bypasses RLS — sees all users)
   let positions: PositionRow[];
   try {
     positions = (await sql`
-      SELECT ticker, name, asset_type, underlying_ticker
+      SELECT ticker, display_name, asset_type
       FROM positions
-      WHERE status = 'open'
+      WHERE is_closed = false
     `) as PositionRow[];
   } catch (e) {
     console.error('[cron/news] Failed to fetch positions:', e);
     return NextResponse.json({ error: 'DB query failed' }, { status: 500 });
   }
 
-  // 2. Deduplicate tickers — for options, use underlying_ticker
+  // 2. Deduplicate tickers — for options (call/put), ticker IS the underlying
   const tickerMap = new Map<string, TickerInfo>();
   for (const pos of positions) {
-    const effectiveTicker = pos.asset_type === 'option' && pos.underlying_ticker
-      ? pos.underlying_ticker
-      : pos.ticker;
-    if (!tickerMap.has(effectiveTicker)) {
-      tickerMap.set(effectiveTicker, {
-        ticker: effectiveTicker,
-        companyName: pos.name ?? effectiveTicker,
+    if (!tickerMap.has(pos.ticker)) {
+      tickerMap.set(pos.ticker, {
+        ticker: pos.ticker,
+        companyName: pos.display_name ?? pos.ticker,
       });
     }
   }
@@ -97,14 +93,14 @@ export async function GET(req: NextRequest) {
 
     for (const article of newArticles) {
       // Insert article with null sentiment fields first
-      let insertedId: number | null = null;
+      let insertedId: string | null = null;
       try {
         const inserted = (await sql`
-          INSERT INTO news_articles (ticker, title, url, source, published_at, raw_title)
-          VALUES (${ticker}, ${article.title}, ${article.url}, ${article.source}, ${article.published_at}, ${article.title})
+          INSERT INTO news_articles (ticker, title, url, source, published_at)
+          VALUES (${ticker}, ${article.title}, ${article.url}, ${article.source}, ${article.published_at})
           ON CONFLICT (url) DO NOTHING
-          RETURNING id
-        `) as Array<{ id: number }>;
+          RETURNING id::text
+        `) as Array<{ id: string }>;
         insertedId = inserted[0]?.id ?? null;
         existingUrls.add(article.url);
       } catch (e) {
@@ -127,12 +123,11 @@ export async function GET(req: NextRequest) {
             UPDATE news_articles
             SET
               sentiment = ${sentiment.sentiment},
-              sentiment_confidence = ${sentiment.confidence},
+              confidence = ${sentiment.confidence},
               summary = ${sentiment.summary},
               impact = ${sentiment.impact},
-              relevance = ${sentiment.relevance},
               tags = ${sentiment.tags}
-            WHERE id = ${insertedId}
+            WHERE id = ${insertedId}::uuid
           `;
           articlesAnalysed++;
         } catch (e) {
@@ -176,23 +171,21 @@ export async function GET(req: NextRequest) {
       if (summary.overall_summary) {
         try {
           await sql`
-            INSERT INTO ticker_summaries (ticker, date, overall_summary, recommendation, risks, catalysts, updated_at)
+            INSERT INTO ticker_summaries (ticker, date, overall_summary, recommendation, risks, catalysts)
             VALUES (
               ${ticker},
               CURRENT_DATE,
               ${summary.overall_summary},
               ${summary.recommendation},
               ${summary.risks},
-              ${summary.catalysts},
-              NOW()
+              ${summary.catalysts}
             )
             ON CONFLICT (ticker, date)
             DO UPDATE SET
               overall_summary = EXCLUDED.overall_summary,
               recommendation = EXCLUDED.recommendation,
               risks = EXCLUDED.risks,
-              catalysts = EXCLUDED.catalysts,
-              updated_at = NOW()
+              catalysts = EXCLUDED.catalysts
           `;
         } catch (e) {
           console.warn(`[cron/news] Failed to upsert ticker_summary for ${ticker}:`, e);
@@ -205,11 +198,11 @@ export async function GET(req: NextRequest) {
   let articlesBackfilled = 0;
   try {
     const unanalysed = (await sql`
-      SELECT id, ticker, title FROM news_articles
+      SELECT id::text, ticker, title FROM news_articles
       WHERE sentiment IS NULL
       ORDER BY published_at DESC
       LIMIT 100
-    `) as Array<{ id: number; ticker: string; title: string }>;
+    `) as Array<{ id: string; ticker: string; title: string }>;
 
     for (const article of unanalysed) {
       const info = tickerMap.get(article.ticker);
@@ -227,12 +220,11 @@ export async function GET(req: NextRequest) {
             UPDATE news_articles
             SET
               sentiment = ${sentiment.sentiment},
-              sentiment_confidence = ${sentiment.confidence},
+              confidence = ${sentiment.confidence},
               summary = ${sentiment.summary},
               impact = ${sentiment.impact},
-              relevance = ${sentiment.relevance},
               tags = ${sentiment.tags}
-            WHERE id = ${article.id}
+            WHERE id = ${article.id}::uuid
           `;
           articlesBackfilled++;
         } catch (e) {

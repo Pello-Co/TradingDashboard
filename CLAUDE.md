@@ -124,75 +124,71 @@ vercel.json                         # Cron job schedule config
 
 ## Database Schema
 
-### `positions` table — open and closed trading positions
+### Better Auth tables (managed by Better Auth, do not modify)
+`user`, `session`, `account`, `verification` — created by `scripts/migrate-auth.ts`
+
+### `positions` table — open and closed trading positions (per user)
 ```sql
-id              SERIAL PRIMARY KEY
-ticker          VARCHAR(20) NOT NULL          -- Display ticker (e.g. AAPL)
-name            VARCHAR(100)                  -- Company name
-yahoo_ticker    VARCHAR(30)                   -- Yahoo Finance ticker (may differ)
-platform        VARCHAR(20)                   -- freetrade | trading212 | ibkr | crypto
-direction       VARCHAR(10) DEFAULT 'long'    -- long | short
-entry_price     DECIMAL(18,8)
-quantity        DECIMAL(18,8)
-opened_at       TIMESTAMP
-closed_at       TIMESTAMP                     -- NULL if open
-exit_price      DECIMAL(18,8)                 -- NULL if open
-status          VARCHAR(10)                   -- open | closed
-source          VARCHAR(100)                  -- Who recommended the trade
-thesis          TEXT
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+user_id         TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE
+ticker          TEXT NOT NULL                 -- Display ticker / underlying for options (e.g. AAPL)
+display_name    TEXT                          -- Company name
+yahoo_ticker    TEXT                          -- Yahoo Finance ticker (may differ)
+asset_type      TEXT NOT NULL                 -- stock | call | put
+entry_price     NUMERIC(18,6) NOT NULL
+quantity        NUMERIC(18,6) NOT NULL
+currency        TEXT NOT NULL DEFAULT 'USD'   -- USD | GBP | EUR | GBX
+platform        TEXT DEFAULT 'IBKR'
+strike          NUMERIC(18,6)                 -- options only
+expiry          DATE                          -- options only
+source          TEXT                          -- Who recommended the trade
 notes           TEXT
-asset_type      VARCHAR(10)                   -- stock | option
-option_type     VARCHAR(10)                   -- call | put (options only)
-strike_price    DECIMAL(18,8)                 -- options only
-expiry_date     DATE                          -- options only
-underlying_ticker VARCHAR(30)                 -- options only
-currency        VARCHAR(10) DEFAULT 'USD'     -- USD | EUR | GBP | GBX
-created_at      TIMESTAMP
-updated_at      TIMESTAMP
+is_closed       BOOLEAN NOT NULL DEFAULT false
+closed_at       TIMESTAMPTZ
+close_price     NUMERIC(18,6)
+created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+
+RLS: ENABLED — policy "positions_user_isolation" enforces user_id = app.current_user_id
+Note: neondb_owner is a superuser and bypasses RLS; explicit WHERE user_id = $userId used in all app queries
 ```
 
-### `news_articles` table — AI-analysed news per ticker
+### `news_articles` table — AI-analysed news per ticker (global, not per user)
 ```sql
-id                  SERIAL PRIMARY KEY
-ticker              VARCHAR(20)
-title               TEXT
-url                 TEXT UNIQUE
-source              VARCHAR(100)
-published_at        TIMESTAMP
-sentiment           VARCHAR(10)               -- bullish | bearish | neutral
-sentiment_confidence DECIMAL(3,2)            -- 0.0–1.0
-summary             TEXT                      -- AI-generated 1-sentence summary
-impact              VARCHAR(10)               -- high | medium | low
-relevance           VARCHAR(10)               -- high | medium | low
-tags                TEXT[]                    -- e.g. ['earnings', 'macro']
-raw_title           TEXT
-created_at          TIMESTAMP
-updated_at          TIMESTAMP
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+ticker          TEXT NOT NULL
+title           TEXT NOT NULL
+url             TEXT NOT NULL UNIQUE
+source          TEXT
+published_at    TIMESTAMPTZ
+sentiment       TEXT                          -- bullish | bearish | neutral
+confidence      NUMERIC(5,4)                  -- 0.0–1.0
+summary         TEXT                          -- AI-generated 1-sentence summary
+impact          TEXT
+tags            TEXT[]
+created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```
 
-### `ticker_summaries` table — daily AI summary per ticker
+### `ticker_summaries` table — daily AI summary per ticker (global, not per user)
 ```sql
-id              SERIAL PRIMARY KEY
-ticker          VARCHAR(20)
-date            DATE DEFAULT CURRENT_DATE
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+ticker          TEXT NOT NULL
+date            DATE NOT NULL
 overall_summary TEXT
-recommendation  VARCHAR(20)                   -- Strong Buy | Buy | Hold | Sell | Strong Sell
+recommendation  TEXT                          -- buy | hold | sell
 risks           TEXT
 catalysts       TEXT
-created_at      TIMESTAMP
-updated_at      TIMESTAMP
+created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 UNIQUE(ticker, date)
 ```
 
-### `token_usage_log` table — daily OpenAI API cost tracking
+### `token_usage_log` table — daily OpenAI API cost tracking (global)
 ```sql
-id              SERIAL PRIMARY KEY
-date            DATE UNIQUE
-input_tokens    INTEGER DEFAULT 0
-output_tokens   INTEGER DEFAULT 0
-api_calls       INTEGER DEFAULT 0
-created_at      TIMESTAMP
-updated_at      TIMESTAMP
+id              UUID PRIMARY KEY DEFAULT gen_random_uuid()
+date            DATE NOT NULL UNIQUE
+input_tokens    INTEGER NOT NULL DEFAULT 0
+output_tokens   INTEGER NOT NULL DEFAULT 0
+api_calls       INTEGER NOT NULL DEFAULT 0
+updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 ```
 
 ## Implemented Features
@@ -299,6 +295,7 @@ Files: `.env.local` (dev), `.env.production` and `.env.vercel-prod` (prod).
 - [x] Vercel deployment (active, with cron)
 - [x] Better Auth — email/password auth, session management, route protection
 - [x] Resend email verification (verification + password reset via noreply@bullist.co)
+- [x] DB rebuild with user_id + RLS (positions scoped per user)
 - [ ] Trade entry form (UI to add new trades)
 - [ ] Trade close flow (UI to close positions with exit price)
 - [ ] Trade history view (closed trades archive)
@@ -328,6 +325,10 @@ Files: `.env.local` (dev), `.env.production` and `.env.vercel-prod` (prod).
 | 2026-03-11 | emailVerification is a top-level betterAuth option, not a plugin | Task card example was wrong; actual API uses `emailVerification: { sendVerificationEmail: ... }` |
 | 2026-03-11 | Resend sender: noreply@bullist.co | Domain is bullist.co; must be verified in Resend dashboard |
 | 2026-03-11 | Resend env var named RESEND_BULLIST_KEY (not RESEND_API_KEY) | Operator set it with this name in Vercel; code updated to match |
+| 2026-03-11 | Phase 3 schema: UUID PKs, user_id FK, asset_type merges call/put | Simpler schema; ticker IS the underlying for options; no direction/thesis/underlying_ticker |
+| 2026-03-11 | ticker_summaries recommendation: buy/hold/sell (lowercase) | Simplified from 5-value scale; matches AI prompt and DB constraint |
+| 2026-03-11 | neondb_owner bypasses RLS; explicit WHERE user_id added | Superuser connections bypass Postgres RLS by default; double-filter for safety |
+| 2026-03-11 | Dashboard uses sql.transaction() to set app.current_user_id before query | Correct RLS setup for future non-superuser roles; also filters by user_id explicitly |
 
 ## When You're Stuck
 

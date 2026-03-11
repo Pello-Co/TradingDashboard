@@ -166,7 +166,7 @@ function ArticleRow({ article }: { article: NewsArticle }) {
         </a>
         {/* Sentiment pill — right of title on wider screens */}
         <div className="flex-shrink-0">
-          <SentimentPill sentiment={article.sentiment} confidence={article.sentiment_confidence} />
+          <SentimentPill sentiment={article.sentiment} confidence={article.confidence} />
         </div>
       </div>
 
@@ -202,11 +202,9 @@ function ArticleRow({ article }: { article: NewsArticle }) {
 }
 
 const RECOMMENDATION_STYLES: Record<string, { pill: string; label: string }> = {
-  'Strong Buy': { pill: 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/50', label: 'Strong Buy' },
-  'Buy': { pill: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40', label: 'Buy' },
-  'Hold': { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', label: 'Hold' },
-  'Sell': { pill: 'bg-red-500/20 text-red-300 border border-red-500/40', label: 'Sell' },
-  'Strong Sell': { pill: 'bg-red-500/30 text-red-200 border border-red-400/50', label: 'Strong Sell' },
+  'buy': { pill: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40', label: 'Buy' },
+  'hold': { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', label: 'Hold' },
+  'sell': { pill: 'bg-red-500/20 text-red-300 border border-red-500/40', label: 'Sell' },
 };
 
 function TickerSummaryPanel({ summary }: { summary: TickerSummary }) {

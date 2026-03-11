@@ -3,17 +3,14 @@
 import { useState, useMemo } from 'react';
 
 export interface EnrichedPosition {
-  id: number;
+  id: string;
   ticker: string;
-  name: string | null;
+  display_name: string | null;
   yahoo_ticker: string;
   platform: string;
-  direction: string;
-  asset_type: string;
-  option_type: string | null;
-  strike_price: string | null;
-  expiry_date: string | null;
-  underlying_ticker: string | null;
+  asset_type: 'stock' | 'call' | 'put';
+  strike: string | null;
+  expiry: string | null;
   currency: string;
   entry: number;
   qty: number;
@@ -113,32 +110,20 @@ function fmtPnlPct(n: number | null) {
 }
 
 function formatOptionTicker(pos: EnrichedPosition): string {
-  const type = pos.option_type === 'call' ? 'C' : 'P';
-  const rawStrike = pos.strike_price ? parseFloat(pos.strike_price) : 0;
+  const type = pos.asset_type === 'call' ? 'C' : 'P';
+  const rawStrike = pos.strike ? parseFloat(pos.strike) : 0;
   const strikeStr = rawStrike % 1 === 0 ? String(Math.round(rawStrike)) : String(rawStrike);
-  // expiry_date: "2026-04-17" → "04/17"
-  const expiry = pos.expiry_date ? pos.expiry_date.substring(5).replace('-', '/') : '';
-  return `${pos.underlying_ticker} $${strikeStr}${type} ${expiry}`;
-}
-
-function getTypeBadgeKey(pos: EnrichedPosition): string {
-  if (pos.asset_type === 'option') return pos.option_type ?? 'call';
-  return 'stock';
-}
-
-function getTypeBadgeLabel(pos: EnrichedPosition): string {
-  if (pos.asset_type === 'option') return pos.option_type === 'call' ? 'CALL' : 'PUT';
-  return 'STOCK';
+  // expiry: "2026-04-17" → "04/17"
+  const expiry = pos.expiry ? pos.expiry.substring(5).replace('-', '/') : '';
+  return `${pos.ticker} $${strikeStr}${type} ${expiry}`;
 }
 
 function sortPositions(positions: EnrichedPosition[], key: SortKey, dir: SortDir) {
   return [...positions].sort((a, b) => {
     if (key === 'ticker') {
-      const aVal = a.asset_type === 'option' ? (a.underlying_ticker ?? a.ticker) : a.ticker;
-      const bVal = b.asset_type === 'option' ? (b.underlying_ticker ?? b.ticker) : b.ticker;
       return dir === 'asc'
-        ? aVal.localeCompare(bVal)
-        : bVal.localeCompare(aVal);
+        ? a.ticker.localeCompare(b.ticker)
+        : b.ticker.localeCompare(a.ticker);
     }
 
     // Use USD values for market value sort so cross-currency comparison is meaningful
@@ -164,7 +149,6 @@ const HEADERS: { label: string; sortKey?: SortKey }[] = [
   { label: 'Ticker', sortKey: 'ticker' },
   { label: 'Name' },
   { label: 'Platform' },
-  { label: 'Dir' },
   { label: 'Entry' },
   { label: 'Current' },
   { label: 'Qty' },
@@ -191,7 +175,8 @@ export default function PortfolioClient({
 
   const filtered = useMemo(() => {
     return allPositions.filter((p) => {
-      if (filterAsset !== 'all' && p.asset_type !== filterAsset) return false;
+      if (filterAsset === 'stock' && p.asset_type !== 'stock') return false;
+      if (filterAsset === 'option' && p.asset_type === 'stock') return false;
       if (filterPlatform !== 'all' && p.platform !== filterPlatform) return false;
       return true;
     });
@@ -199,7 +184,7 @@ export default function PortfolioClient({
 
   const sorted = useMemo(() => sortPositions(filtered, sortKey, sortDir), [filtered, sortKey, sortDir]);
 
-  // Summary totals — all in USD
+  // Summary totals — all in GBP
   const totalValue = filtered.reduce((s, p) => s + (p.marketValueUsd ?? 0), 0);
   const totalPnlAbs = filtered.reduce((s, p) => s + (p.totalPnlAbsUsd ?? 0), 0);
   const totalCostBasis = filtered.reduce((s, p) => s + p.costBasisUsd, 0);
@@ -321,15 +306,13 @@ export default function PortfolioClient({
           <tbody className="divide-y divide-gray-800/50">
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={14} className="px-4 py-12 text-center text-gray-500">
+                <td colSpan={13} className="px-4 py-12 text-center text-gray-500">
                   No positions match the current filters.
                 </td>
               </tr>
             ) : (
               sorted.map((pos) => {
-                const isOption = pos.asset_type === 'option';
-                const typeBadgeKey = getTypeBadgeKey(pos);
-                const typeBadgeLabel = getTypeBadgeLabel(pos);
+                const isOption = pos.asset_type === 'call' || pos.asset_type === 'put';
                 const displayTicker = isOption ? formatOptionTicker(pos) : pos.ticker;
 
                 return (
@@ -337,22 +320,17 @@ export default function PortfolioClient({
                     <td className="px-3 py-2.5">
                       <div className="flex flex-col gap-0.5">
                         <span className="font-bold text-white whitespace-nowrap">{displayTicker}</span>
-                        <span className={`inline-block self-start rounded px-1 py-0 text-[10px] leading-4 ${TYPE_BADGE[typeBadgeKey]}`}>
-                          {typeBadgeLabel}
+                        <span className={`inline-block self-start rounded px-1 py-0 text-[10px] leading-4 ${TYPE_BADGE[pos.asset_type]}`}>
+                          {pos.asset_type.toUpperCase()}
                         </span>
                       </div>
                     </td>
                     <td className="px-3 py-2.5 text-gray-400 text-xs max-w-[120px] truncate">
-                      {isOption ? '—' : (pos.name ?? '—')}
+                      {isOption ? '—' : (pos.display_name ?? '—')}
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-block rounded px-1.5 py-0.5 text-xs ${PLATFORM_COLORS[pos.platform] ?? 'bg-gray-800 text-gray-400'}`}>
                         {PLATFORM_LABELS[pos.platform] ?? pos.platform}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <span className={`text-xs font-medium ${pos.direction === 'long' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {pos.direction.toUpperCase()}
                       </span>
                     </td>
                     {/* Entry: native currency */}
@@ -366,13 +344,13 @@ export default function PortfolioClient({
                     <td className="px-3 py-2.5 text-gray-200">
                       {fmtMarketValue(pos.marketValue, pos.currency)}
                     </td>
-                    {/* P&L $: USD */}
+                    {/* P&L £: GBP */}
                     <td className={`px-3 py-2.5 ${pnlClass(pos.totalPnlAbsUsd)}`}>{fmtPnlAbs(pos.totalPnlAbsUsd)}</td>
                     <td className={`px-3 py-2.5 ${pnlClass(pos.totalPnlPct)}`}>{fmtPnlPct(pos.totalPnlPct)}</td>
-                    {/* Day $: USD */}
+                    {/* Day £: GBP */}
                     <td className={`px-3 py-2.5 ${pnlClass(pos.dailyPnlAbsUsd)}`}>{fmtPnlAbs(pos.dailyPnlAbsUsd)}</td>
                     <td className={`px-3 py-2.5 ${pnlClass(pos.dailyPnlPct)}`}>{fmtPnlPct(pos.dailyPnlPct)}</td>
-                    {/* Wk $: USD */}
+                    {/* Wk £: GBP */}
                     <td className={`px-3 py-2.5 ${pnlClass(pos.weeklyPnlAbsUsd)}`}>{fmtPnlAbs(pos.weeklyPnlAbsUsd)}</td>
                     <td className={`px-3 py-2.5 ${pnlClass(pos.weeklyPnlPct)}`}>{fmtPnlPct(pos.weeklyPnlPct)}</td>
                   </tr>

@@ -7,17 +7,16 @@ import TabNav from '@/app/components/TabNav';
 import NewsFeed from '@/app/news/components/NewsFeed';
 
 export interface NewsArticle {
-  id: number;
+  id: string;
   ticker: string;
   title: string;
   url: string;
   source: string | null;
   published_at: string | null;
   sentiment: 'bullish' | 'bearish' | 'neutral' | null;
-  sentiment_confidence: string | null;
+  confidence: string | null;
   summary: string | null;
   impact: string | null;
-  relevance: string | null;
   tags: string[] | null;
 }
 
@@ -25,7 +24,7 @@ export interface TickerSummary {
   ticker: string;
   date: string; // YYYY-MM-DD
   overall_summary: string;
-  recommendation: 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell';
+  recommendation: 'buy' | 'hold' | 'sell';
   risks: string | null;
   catalysts: string | null;
 }
@@ -58,8 +57,8 @@ export default async function NewsPage() {
   let articles: NewsArticle[] = [];
   try {
     articles = (await sql`
-      SELECT id, ticker, title, url, source, published_at,
-             sentiment, sentiment_confidence, summary, impact, relevance, tags
+      SELECT id::text, ticker, title, url, source, published_at,
+             sentiment, confidence, summary, impact, tags
       FROM news_articles
       WHERE published_at >= NOW() - INTERVAL '7 days'
       ORDER BY published_at DESC

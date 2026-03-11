@@ -8,23 +8,18 @@ import PortfolioClient, { EnrichedPosition } from '@/app/components/PortfolioCli
 import TabNav from '@/app/components/TabNav';
 
 interface RawPosition {
-  id: number;
+  id: string;
   ticker: string;
-  name: string | null;
-  yahoo_ticker: string;
-  platform: 'freetrade' | 'trading212' | 'ibkr' | 'crypto';
-  direction: 'long' | 'short';
+  display_name: string | null;
+  yahoo_ticker: string | null;
+  platform: string | null;
   entry_price: string;
   quantity: string;
-  opened_at: string;
   source: string | null;
-  thesis: string | null;
-  asset_type: string;
-  option_type: string | null;
-  strike_price: string | null;
-  expiry_date: unknown; // may be Date object or string from DB driver
-  underlying_ticker: string | null;
-  currency: string | null;
+  asset_type: 'stock' | 'call' | 'put';
+  strike: string | null;
+  expiry: unknown; // may be Date object or string from DB driver
+  currency: string;
 }
 
 function toGbp(amount: number, currency: string, rates: ExchangeRates): number {
@@ -39,6 +34,7 @@ function toGbp(amount: number, currency: string, rates: ExchangeRates): number {
 export default async function DashboardPage() {
   const session = await getSession();
   if (!session) redirect('/sign-in');
+  const userId = session.user.id;
 
   if (!sql) {
     return (
@@ -54,14 +50,19 @@ export default async function DashboardPage() {
 
   let rows: RawPosition[] = [];
   try {
-    rows = (await sql`
-      SELECT id, ticker, name, yahoo_ticker, platform, direction, entry_price, quantity, opened_at, source, thesis,
-             asset_type, option_type, strike_price, expiry_date, underlying_ticker,
-             COALESCE(currency, 'USD') AS currency
-      FROM positions
-      WHERE status = 'open'
-      ORDER BY opened_at DESC
-    `) as RawPosition[];
+    // Set user context for RLS, then query positions filtered by user_id
+    const results = await sql.transaction([
+      sql`SELECT set_config('app.current_user_id', ${userId}, true)`,
+      sql`
+        SELECT id::text, ticker, display_name, yahoo_ticker, platform, entry_price, quantity,
+               source, asset_type, strike, expiry::text,
+               COALESCE(currency, 'USD') AS currency
+        FROM positions
+        WHERE user_id = ${userId} AND is_closed = false
+        ORDER BY created_at DESC
+      `,
+    ]);
+    rows = results[1] as RawPosition[];
   } catch (e) {
     console.error('DB query failed:', e);
     return (
@@ -74,7 +75,8 @@ export default async function DashboardPage() {
     );
   }
 
-  const yahooTickers = rows.map((r) => r.yahoo_ticker);
+  // For options, yahoo_ticker may be null — fall back to ticker
+  const yahooTickers = rows.map((r) => r.yahoo_ticker ?? r.ticker);
 
   let quotes = new Map<string, import('@/lib/prices').QuoteResult>();
   let weeklyChanges = new Map<string, import('@/lib/prices').WeeklyChangeResult>();
@@ -93,13 +95,13 @@ export default async function DashboardPage() {
   const positions: EnrichedPosition[] = rows.map((pos) => {
     const entry = parseFloat(pos.entry_price);
     const qty = parseFloat(pos.quantity);
-    const isOption = pos.asset_type === 'option';
+    const isOption = pos.asset_type === 'call' || pos.asset_type === 'put';
     // US options: each contract represents 100 shares
     const contractMultiplier = isOption ? 100 : 1;
-    const dirMultiplier = pos.direction === 'short' ? -1 : 1;
 
-    const quote = quotes.get(pos.yahoo_ticker);
-    const weekly = weeklyChanges.get(pos.yahoo_ticker);
+    const yahooTicker = pos.yahoo_ticker ?? pos.ticker;
+    const quote = quotes.get(yahooTicker);
+    const weekly = weeklyChanges.get(yahooTicker);
 
     const current = quote?.currentPrice ?? null;
     const prevClose = quote?.previousClose ?? null;
@@ -111,23 +113,23 @@ export default async function DashboardPage() {
     // Native-currency values (GBX = pence)
     const marketValue = current !== null ? current * qty * contractMultiplier : null;
     const costBasis = entry * qty * contractMultiplier;
-    const totalPnlAbs = current !== null ? (current - entry) * qty * contractMultiplier * dirMultiplier : null;
-    const totalPnlPct = current !== null ? ((current - entry) / entry) * 100 * dirMultiplier : null;
+    const totalPnlAbs = current !== null ? (current - entry) * qty * contractMultiplier : null;
+    const totalPnlPct = current !== null ? ((current - entry) / entry) * 100 : null;
     const dailyPnlAbs =
       current !== null && prevClose !== null
-        ? (current - prevClose) * qty * contractMultiplier * dirMultiplier
+        ? (current - prevClose) * qty * contractMultiplier
         : null;
     const dailyPnlPct =
       current !== null && prevClose !== null
-        ? ((current - prevClose) / prevClose) * 100 * dirMultiplier
+        ? ((current - prevClose) / prevClose) * 100
         : null;
     const weeklyPnlAbs =
       current !== null && weekAgo !== null
-        ? (current - weekAgo) * qty * contractMultiplier * dirMultiplier
+        ? (current - weekAgo) * qty * contractMultiplier
         : null;
     const weeklyPnlPct =
       current !== null && weekAgo !== null
-        ? ((current - weekAgo) / weekAgo) * 100 * dirMultiplier
+        ? ((current - weekAgo) / weekAgo) * 100
         : null;
 
     // GBP-converted values for totals and P&L display
@@ -141,10 +143,10 @@ export default async function DashboardPage() {
     const weekValueUsd =
       weekAgo !== null ? toGbp(weekAgo * qty * contractMultiplier, currency, rates) : null;
 
-    // Normalize expiry_date: DB may return a Date object or ISO string
+    // Normalize expiry: DB may return a Date object or ISO string
     let expiryDate: string | null = null;
-    if (pos.expiry_date) {
-      const raw = pos.expiry_date;
+    if (pos.expiry) {
+      const raw = pos.expiry;
       if (raw instanceof Date) {
         expiryDate = raw.toISOString().split('T')[0];
       } else {
@@ -155,15 +157,12 @@ export default async function DashboardPage() {
     return {
       id: pos.id,
       ticker: pos.ticker,
-      name: pos.name,
-      yahoo_ticker: pos.yahoo_ticker,
-      platform: pos.platform,
-      direction: pos.direction,
+      display_name: pos.display_name,
+      yahoo_ticker: yahooTicker,
+      platform: pos.platform ?? 'ibkr',
       asset_type: pos.asset_type,
-      option_type: pos.option_type,
-      strike_price: pos.strike_price,
-      expiry_date: expiryDate,
-      underlying_ticker: pos.underlying_ticker,
+      strike: pos.strike,
+      expiry: expiryDate,
       currency,
       entry,
       qty,
