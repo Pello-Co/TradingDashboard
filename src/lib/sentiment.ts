@@ -7,8 +7,8 @@ export interface SentimentResult {
   tags: string[] | null;
 }
 
-const GLM_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
-const GLM_MODEL = 'GLM-5';
+const API_BASE_URL = 'https://api.openai.com/v1';
+const MODEL = 'gpt-5-mini';
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,10 +19,10 @@ export async function analyseArticle(
   companyName: string,
   articleTitle: string
 ): Promise<SentimentResult> {
-  const apiKey = process.env.GLM_KEY;
+  const apiKey = process.env.OPENAI_KEY;
 
   if (!apiKey) {
-    console.info('[sentiment] GLM_KEY not set — skipping analysis');
+    console.info('[sentiment] OPENAI_KEY not set — skipping analysis');
     return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null };
   }
 
@@ -36,14 +36,14 @@ export async function analyseArticle(
 
   let responseText: string;
   try {
-    const res = await fetch(`${GLM_BASE_URL}/chat/completions`, {
+    const res = await fetch(`${API_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: GLM_MODEL,
+        model: MODEL,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -56,7 +56,7 @@ export async function analyseArticle(
 
     if (!res.ok) {
       const body = await res.text().catch(() => '');
-      console.warn(`[sentiment] GLM API error ${res.status}:`, body.slice(0, 200));
+      console.warn(`[sentiment] OpenAI API error ${res.status}:`, body.slice(0, 200));
       return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null };
     }
 
@@ -65,7 +65,7 @@ export async function analyseArticle(
     };
     responseText = data?.choices?.[0]?.message?.content ?? '';
   } catch (e) {
-    console.warn('[sentiment] GLM fetch error:', e instanceof Error ? e.message : e);
+    console.warn('[sentiment] OpenAI fetch error:', e instanceof Error ? e.message : e);
     return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null };
   }
 
@@ -98,7 +98,7 @@ export async function analyseArticle(
 
     return { sentiment, confidence, summary, impact, relevance, tags };
   } catch (e) {
-    console.warn('[sentiment] Failed to parse GLM response:', responseText.slice(0, 200), e);
+    console.warn('[sentiment] Failed to parse response:', responseText.slice(0, 200), e);
     return { sentiment: null, confidence: null, summary: null, impact: null, relevance: null, tags: null };
   }
 }
