@@ -3,6 +3,38 @@
 import { useState } from 'react';
 import type { NewsArticle, TickerSummary, TokenUsage } from '@/app/news/page';
 
+// ── Date helpers ─────────────────────────────────────────────────────────────
+
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function getUTCDate(dateStr: string | null): string | null {
+  if (!dateStr) return null;
+  return new Date(dateStr).toISOString().slice(0, 10);
+}
+
+function buildDateTabs(): { value: string; label: string; isToday: boolean }[] {
+  const tabs = [];
+  const now = new Date();
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(now);
+    d.setUTCDate(d.getUTCDate() - i);
+    const value = d.toISOString().slice(0, 10);
+    const day = d.getUTCDate();
+    const month = d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' });
+    const label = i === 0 ? `${day} ${month} (Today)` : `${day} ${month}`;
+    tabs.push({ value, label, isToday: i === 0 });
+  }
+  return tabs;
+}
+
+// ── Shared constants ──────────────────────────────────────────────────────────
+
+const INACTIVE_PILL = 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600';
+
+// ── Utility components ────────────────────────────────────────────────────────
+
 function relativeTime(dateStr: string | null): string {
   if (!dateStr) return '';
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -274,7 +306,7 @@ function TickerCard({
   );
 }
 
-function TokenUsageFooter({ usage }: { usage: TokenUsage }) {
+function TokenUsageFooter({ usage, date }: { usage: TokenUsage; date: string }) {
   const totalTokens = usage.input_tokens + usage.output_tokens;
   const fmtNum = (n: number) =>
     n >= 1_000_000
@@ -283,10 +315,17 @@ function TokenUsageFooter({ usage }: { usage: TokenUsage }) {
       ? `${(n / 1_000).toFixed(1)}k`
       : String(n);
 
+  // Format date for display
+  const d = new Date(date + 'T00:00:00Z');
+  const day = d.getUTCDate();
+  const month = d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' });
+  const isToday = date === todayUTC();
+  const dateLabel = isToday ? `Today (${day} ${month})` : `${day} ${month}`;
+
   return (
     <div className="mt-8 border-t border-gray-800/60 pt-4">
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider">AI Token Usage (7d)</span>
+        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider">AI Token Usage · {dateLabel}</span>
         <span className="text-xs text-gray-500">
           <span className="text-gray-400 font-medium">{fmtNum(usage.input_tokens)}</span> in
         </span>
@@ -313,27 +352,43 @@ const SENTIMENT_FILTERS: { value: SentimentFilter; label: string; activeClass: s
   { value: 'neutral', label: 'Neutral', activeClass: 'bg-gray-700 text-gray-300 border border-gray-600' },
 ];
 
-const INACTIVE_PILL = 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600';
-
 export default function NewsFeed({
   articles,
-  summaryMap,
-  tokenUsage,
+  tickerSummaries,
+  tokenUsageByDate,
 }: {
   articles: NewsArticle[];
-  summaryMap: Record<string, TickerSummary>;
-  tokenUsage: TokenUsage | null;
+  tickerSummaries: TickerSummary[];
+  tokenUsageByDate: Record<string, TokenUsage>;
 }) {
-  const tickers = Array.from(new Set(articles.map((a) => a.ticker))).sort();
+  const dateTabs = buildDateTabs();
+  const [selectedDate, setSelectedDate] = useState<string>(dateTabs[0].value);
   const [activeTicker, setActiveTicker] = useState<string>('all');
   const [activeSentiment, setActiveSentiment] = useState<SentimentFilter>('all');
 
-  // Filter articles first by ticker, then by sentiment
-  const filteredArticles = articles.filter((a) => {
+  // Filter articles by selected date, then ticker, then sentiment
+  const dateFilteredArticles = articles.filter(
+    (a) => getUTCDate(a.published_at) === selectedDate
+  );
+
+  const filteredArticles = dateFilteredArticles.filter((a) => {
     const tickerMatch = activeTicker === 'all' || a.ticker === activeTicker;
     const sentimentMatch = activeSentiment === 'all' || a.sentiment === activeSentiment;
     return tickerMatch && sentimentMatch;
   });
+
+  // Tickers available for this day (before sentiment filter, for the pill row)
+  const tickersForDay = Array.from(new Set(dateFilteredArticles.map((a) => a.ticker))).sort();
+
+  // Summary map for selected date
+  const summaryMap = Object.fromEntries(
+    tickerSummaries
+      .filter((s) => s.date === selectedDate)
+      .map((s) => [s.ticker, s])
+  );
+
+  // Token usage for selected date
+  const tokenUsage = tokenUsageByDate[selectedDate] ?? null;
 
   // Group by ticker, sort groups by most recent article first
   const groups = filteredArticles.reduce<Record<string, NewsArticle[]>>((acc, a) => {
@@ -348,8 +403,35 @@ export default function NewsFeed({
     return latestB.localeCompare(latestA);
   });
 
+  function handleDateChange(date: string) {
+    setSelectedDate(date);
+    setActiveTicker('all');
+    setActiveSentiment('all');
+  }
+
   return (
     <div>
+      {/* Date tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-1 mb-5 scrollbar-hide">
+        {dateTabs.map((tab) => {
+          const isActive = tab.value === selectedDate;
+          return (
+            <button
+              key={tab.value}
+              onClick={() => handleDateChange(tab.value)}
+              className={[
+                'flex-shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors duration-150 cursor-pointer whitespace-nowrap',
+                isActive
+                  ? 'bg-gray-700 text-gray-100 border border-gray-500'
+                  : 'bg-gray-800/60 text-gray-500 border border-gray-700/60 hover:text-gray-300 hover:border-gray-600',
+              ].join(' ')}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Ticker filter */}
       <div className="flex flex-wrap gap-2 mb-3">
         <button
@@ -363,7 +445,7 @@ export default function NewsFeed({
         >
           All
         </button>
-        {tickers.map((ticker) => (
+        {tickersForDay.map((ticker) => (
           <button
             key={ticker}
             onClick={() => setActiveTicker(ticker)}
@@ -396,7 +478,7 @@ export default function NewsFeed({
       </div>
 
       {/* Grouped ticker cards */}
-      {sortedTickers.length === 0 ? (
+      {dateFilteredArticles.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="h-10 w-10 rounded-full bg-gray-800 flex items-center justify-center mb-4">
             <svg
@@ -414,8 +496,12 @@ export default function NewsFeed({
               />
             </svg>
           </div>
-          <p className="text-sm text-gray-400 mb-1">No news articles yet.</p>
+          <p className="text-sm text-gray-400 mb-1">No articles for this date.</p>
           <p className="text-xs text-gray-600">News is refreshed daily at 2pm UK time.</p>
+        </div>
+      ) : sortedTickers.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <p className="text-sm text-gray-400">No articles match the current filters.</p>
         </div>
       ) : (
         <div className="flex flex-col gap-4">
@@ -431,7 +517,7 @@ export default function NewsFeed({
       )}
 
       {/* Token usage footer */}
-      {tokenUsage && <TokenUsageFooter usage={tokenUsage} />}
+      {tokenUsage && <TokenUsageFooter usage={tokenUsage} date={selectedDate} />}
     </div>
   );
 }

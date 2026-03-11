@@ -21,6 +21,7 @@ export interface NewsArticle {
 
 export interface TickerSummary {
   ticker: string;
+  date: string; // YYYY-MM-DD
   overall_summary: string;
   recommendation: 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell';
   risks: string | null;
@@ -31,6 +32,10 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   api_calls: number;
+}
+
+export interface TokenUsageRow extends TokenUsage {
+  date: string; // YYYY-MM-DD
 }
 
 export default async function NewsPage() {
@@ -69,39 +74,40 @@ export default async function NewsPage() {
   let tickerSummaries: TickerSummary[] = [];
   try {
     tickerSummaries = (await sql`
-      SELECT ticker, overall_summary, recommendation, risks, catalysts
+      SELECT ticker, date::text AS date, overall_summary, recommendation, risks, catalysts
       FROM ticker_summaries
-      WHERE date = CURRENT_DATE
+      WHERE date >= CURRENT_DATE - INTERVAL '6 days'
         AND overall_summary IS NOT NULL
     `) as TickerSummary[];
   } catch (e) {
     console.warn('[news page] ticker_summaries query failed:', e);
   }
 
-  let tokenUsage: TokenUsage | null = null;
+  let tokenUsageByDate: Record<string, TokenUsage> = {};
   try {
     const rows = (await sql`
       SELECT
+        date::text AS date,
         SUM(input_tokens)::int AS input_tokens,
         SUM(output_tokens)::int AS output_tokens,
         SUM(api_calls)::int AS api_calls
       FROM token_usage_log
-      WHERE date >= NOW() - INTERVAL '7 days'
-    `) as Array<{ input_tokens: number | null; output_tokens: number | null; api_calls: number | null }>;
-    const row = rows[0];
-    if (row?.input_tokens != null) {
-      tokenUsage = {
-        input_tokens: row.input_tokens ?? 0,
-        output_tokens: row.output_tokens ?? 0,
-        api_calls: row.api_calls ?? 0,
-      };
+      WHERE date >= CURRENT_DATE - INTERVAL '6 days'
+      GROUP BY date
+      ORDER BY date DESC
+    `) as Array<{ date: string; input_tokens: number | null; output_tokens: number | null; api_calls: number | null }>;
+    for (const row of rows) {
+      if (row.input_tokens != null) {
+        tokenUsageByDate[row.date] = {
+          input_tokens: row.input_tokens ?? 0,
+          output_tokens: row.output_tokens ?? 0,
+          api_calls: row.api_calls ?? 0,
+        };
+      }
     }
   } catch (e) {
     console.warn('[news page] token_usage_log query failed:', e);
   }
-
-  // Build a map for easy lookup in the component
-  const summaryMap = Object.fromEntries(tickerSummaries.map((s) => [s.ticker, s]));
 
   return (
     <div className="min-h-screen bg-gray-950 font-[var(--font-inter)]">
@@ -117,7 +123,7 @@ export default async function NewsPage() {
       <TabNav />
 
       <main className="px-4 py-6 sm:px-6">
-        <NewsFeed articles={articles} summaryMap={summaryMap} tokenUsage={tokenUsage} />
+        <NewsFeed articles={articles} tickerSummaries={tickerSummaries} tokenUsageByDate={tokenUsageByDate} />
       </main>
     </div>
   );
