@@ -47,7 +47,34 @@ async function migrate() {
   await sql`ALTER TABLE positions ADD COLUMN IF NOT EXISTS expiry_date DATE`;
   await sql`ALTER TABLE positions ADD COLUMN IF NOT EXISTS underlying_ticker VARCHAR(30)`;
 
-  console.log('Migration complete: positions table created/updated with options support.');
+  await sql`
+    CREATE TABLE IF NOT EXISTS ticker_summaries (
+      id SERIAL PRIMARY KEY,
+      ticker VARCHAR(20) NOT NULL,
+      date DATE NOT NULL DEFAULT CURRENT_DATE,
+      overall_summary TEXT,
+      recommendation VARCHAR(20) CHECK (recommendation IN ('Strong Buy', 'Buy', 'Hold', 'Sell', 'Strong Sell')),
+      risks TEXT,
+      catalysts TEXT,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      UNIQUE(ticker, date)
+    )
+  `;
+
+  await sql`
+    CREATE TABLE IF NOT EXISTS token_usage_log (
+      id SERIAL PRIMARY KEY,
+      date DATE NOT NULL UNIQUE,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      api_calls INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    )
+  `;
+
+  console.log('Migration complete: positions, ticker_summaries, token_usage_log tables ready.');
 }
 
 migrate().catch((err) => {

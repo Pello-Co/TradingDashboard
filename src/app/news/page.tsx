@@ -19,6 +19,20 @@ export interface NewsArticle {
   tags: string[] | null;
 }
 
+export interface TickerSummary {
+  ticker: string;
+  overall_summary: string;
+  recommendation: 'Strong Buy' | 'Buy' | 'Hold' | 'Sell' | 'Strong Sell';
+  risks: string | null;
+  catalysts: string | null;
+}
+
+export interface TokenUsage {
+  input_tokens: number;
+  output_tokens: number;
+  api_calls: number;
+}
+
 export default async function NewsPage() {
   if (!sql) {
     return (
@@ -52,6 +66,43 @@ export default async function NewsPage() {
     );
   }
 
+  let tickerSummaries: TickerSummary[] = [];
+  try {
+    tickerSummaries = (await sql`
+      SELECT ticker, overall_summary, recommendation, risks, catalysts
+      FROM ticker_summaries
+      WHERE date = CURRENT_DATE
+        AND overall_summary IS NOT NULL
+    `) as TickerSummary[];
+  } catch (e) {
+    console.warn('[news page] ticker_summaries query failed:', e);
+  }
+
+  let tokenUsage: TokenUsage | null = null;
+  try {
+    const rows = (await sql`
+      SELECT
+        SUM(input_tokens)::int AS input_tokens,
+        SUM(output_tokens)::int AS output_tokens,
+        SUM(api_calls)::int AS api_calls
+      FROM token_usage_log
+      WHERE date >= NOW() - INTERVAL '7 days'
+    `) as Array<{ input_tokens: number | null; output_tokens: number | null; api_calls: number | null }>;
+    const row = rows[0];
+    if (row?.input_tokens != null) {
+      tokenUsage = {
+        input_tokens: row.input_tokens ?? 0,
+        output_tokens: row.output_tokens ?? 0,
+        api_calls: row.api_calls ?? 0,
+      };
+    }
+  } catch (e) {
+    console.warn('[news page] token_usage_log query failed:', e);
+  }
+
+  // Build a map for easy lookup in the component
+  const summaryMap = Object.fromEntries(tickerSummaries.map((s) => [s.ticker, s]));
+
   return (
     <div className="min-h-screen bg-gray-950 font-[var(--font-inter)]">
       <header className="border-b border-gray-800 px-4 py-3 sm:px-6">
@@ -66,7 +117,7 @@ export default async function NewsPage() {
       <TabNav />
 
       <main className="px-4 py-6 sm:px-6">
-        <NewsFeed articles={articles} />
+        <NewsFeed articles={articles} summaryMap={summaryMap} tokenUsage={tokenUsage} />
       </main>
     </div>
   );

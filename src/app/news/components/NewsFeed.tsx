@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { NewsArticle } from '@/app/news/page';
+import type { NewsArticle, TickerSummary, TokenUsage } from '@/app/news/page';
 
 function relativeTime(dateStr: string | null): string {
   if (!dateStr) return '';
@@ -169,9 +169,59 @@ function ArticleRow({ article }: { article: NewsArticle }) {
   );
 }
 
+const RECOMMENDATION_STYLES: Record<string, { pill: string; label: string }> = {
+  'Strong Buy': { pill: 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/50', label: 'Strong Buy' },
+  'Buy': { pill: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40', label: 'Buy' },
+  'Hold': { pill: 'bg-amber-500/20 text-amber-300 border border-amber-500/40', label: 'Hold' },
+  'Sell': { pill: 'bg-red-500/20 text-red-300 border border-red-500/40', label: 'Sell' },
+  'Strong Sell': { pill: 'bg-red-500/30 text-red-200 border border-red-400/50', label: 'Strong Sell' },
+};
+
+function TickerSummaryPanel({ summary }: { summary: TickerSummary }) {
+  const rec = summary.recommendation ? RECOMMENDATION_STYLES[summary.recommendation] : null;
+
+  return (
+    <div className="mx-4 mb-3 mt-3 rounded-md bg-gray-800/50 border border-gray-700/60 p-3">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AI Summary</span>
+        {rec && (
+          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${rec.pill}`}>
+            {rec.label}
+          </span>
+        )}
+      </div>
+      <p className="text-xs text-gray-300 leading-relaxed mb-2">{summary.overall_summary}</p>
+      {(summary.catalysts || summary.risks) && (
+        <div className="flex flex-col gap-1 mt-1.5">
+          {summary.catalysts && (
+            <p className="text-xs text-gray-500">
+              <span className="text-emerald-500/80 font-medium">Catalysts: </span>
+              {summary.catalysts}
+            </p>
+          )}
+          {summary.risks && (
+            <p className="text-xs text-gray-500">
+              <span className="text-red-500/80 font-medium">Risks: </span>
+              {summary.risks}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const ARTICLES_VISIBLE_DEFAULT = 3;
 
-function TickerCard({ ticker, articles }: { ticker: string; articles: NewsArticle[] }) {
+function TickerCard({
+  ticker,
+  articles,
+  summary,
+}: {
+  ticker: string;
+  articles: NewsArticle[];
+  summary: TickerSummary | undefined;
+}) {
   const [expanded, setExpanded] = useState(false);
   const counts = computeSentimentCounts(articles);
   const accentBorder = getCardAccent(counts);
@@ -192,7 +242,15 @@ function TickerCard({ ticker, articles }: { ticker: string; articles: NewsArticl
           {articles.length} {articles.length === 1 ? 'article' : 'articles'}
         </span>
         <SentimentBreakdown counts={counts} />
+        {summary?.recommendation && RECOMMENDATION_STYLES[summary.recommendation] && (
+          <span className={`ml-auto inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${RECOMMENDATION_STYLES[summary.recommendation].pill}`}>
+            {RECOMMENDATION_STYLES[summary.recommendation].label}
+          </span>
+        )}
       </div>
+
+      {/* AI overall summary panel */}
+      {summary && <TickerSummaryPanel summary={summary} />}
 
       {/* Article rows */}
       <div className="px-4 bg-gray-900/40">
@@ -216,6 +274,36 @@ function TickerCard({ ticker, articles }: { ticker: string; articles: NewsArticl
   );
 }
 
+function TokenUsageFooter({ usage }: { usage: TokenUsage }) {
+  const totalTokens = usage.input_tokens + usage.output_tokens;
+  const fmtNum = (n: number) =>
+    n >= 1_000_000
+      ? `${(n / 1_000_000).toFixed(1)}M`
+      : n >= 1_000
+      ? `${(n / 1_000).toFixed(1)}k`
+      : String(n);
+
+  return (
+    <div className="mt-8 border-t border-gray-800/60 pt-4">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+        <span className="text-xs text-gray-600 font-medium uppercase tracking-wider">AI Token Usage (7d)</span>
+        <span className="text-xs text-gray-500">
+          <span className="text-gray-400 font-medium">{fmtNum(usage.input_tokens)}</span> in
+        </span>
+        <span className="text-xs text-gray-500">
+          <span className="text-gray-400 font-medium">{fmtNum(usage.output_tokens)}</span> out
+        </span>
+        <span className="text-xs text-gray-500">
+          <span className="text-gray-400 font-medium">{fmtNum(totalTokens)}</span> total
+        </span>
+        <span className="text-xs text-gray-500">
+          <span className="text-gray-400 font-medium">{usage.api_calls}</span> API calls
+        </span>
+      </div>
+    </div>
+  );
+}
+
 type SentimentFilter = 'all' | 'bullish' | 'bearish' | 'neutral';
 
 const SENTIMENT_FILTERS: { value: SentimentFilter; label: string; activeClass: string }[] = [
@@ -227,7 +315,15 @@ const SENTIMENT_FILTERS: { value: SentimentFilter; label: string; activeClass: s
 
 const INACTIVE_PILL = 'bg-gray-800 text-gray-400 border border-gray-700 hover:text-gray-200 hover:border-gray-600';
 
-export default function NewsFeed({ articles }: { articles: NewsArticle[] }) {
+export default function NewsFeed({
+  articles,
+  summaryMap,
+  tokenUsage,
+}: {
+  articles: NewsArticle[];
+  summaryMap: Record<string, TickerSummary>;
+  tokenUsage: TokenUsage | null;
+}) {
   const tickers = Array.from(new Set(articles.map((a) => a.ticker))).sort();
   const [activeTicker, setActiveTicker] = useState<string>('all');
   const [activeSentiment, setActiveSentiment] = useState<SentimentFilter>('all');
@@ -324,10 +420,18 @@ export default function NewsFeed({ articles }: { articles: NewsArticle[] }) {
       ) : (
         <div className="flex flex-col gap-4">
           {sortedTickers.map((ticker) => (
-            <TickerCard key={ticker} ticker={ticker} articles={groups[ticker]} />
+            <TickerCard
+              key={ticker}
+              ticker={ticker}
+              articles={groups[ticker]}
+              summary={summaryMap[ticker]}
+            />
           ))}
         </div>
       )}
+
+      {/* Token usage footer */}
+      {tokenUsage && <TokenUsageFooter usage={tokenUsage} />}
     </div>
   );
 }

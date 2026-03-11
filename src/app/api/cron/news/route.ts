@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { scrapeNewsForTicker, RawArticle } from '@/lib/news';
-import { analyseArticle, sleep } from '@/lib/sentiment';
+import { analyseArticle, generateTickerSummary, ArticleSummaryInput, sleep } from '@/lib/sentiment';
 
 interface PositionRow {
   ticker: string;
@@ -71,6 +71,9 @@ export async function GET(req: NextRequest) {
   let articlesFound = 0;
   let articlesNew = 0;
   let articlesAnalysed = 0;
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+  let totalApiCalls = 0;
 
   for (const { ticker, companyName } of tickers) {
     tickersProcessed++;
@@ -88,6 +91,9 @@ export async function GET(req: NextRequest) {
     // Filter out already-stored articles
     const newArticles = articles.filter((a) => !existingUrls.has(a.url));
     articlesNew += newArticles.length;
+
+    // Track article summaries for this ticker (for the overall summary)
+    const tickerArticleSummaries: ArticleSummaryInput[] = [];
 
     for (const article of newArticles) {
       // Insert article with null sentiment fields first
@@ -111,6 +117,9 @@ export async function GET(req: NextRequest) {
       // Run sentiment analysis with delay between calls
       await sleep(200);
       const sentiment = await analyseArticle(ticker, companyName, article.title);
+      totalInputTokens += sentiment.inputTokens;
+      totalOutputTokens += sentiment.outputTokens;
+      totalApiCalls++;
 
       if (sentiment.sentiment !== null) {
         try {
@@ -128,6 +137,65 @@ export async function GET(req: NextRequest) {
           articlesAnalysed++;
         } catch (e) {
           console.warn(`[cron/news] Update sentiment failed for id ${insertedId}:`, e);
+        }
+      }
+
+      tickerArticleSummaries.push({
+        title: article.title,
+        sentiment: sentiment.sentiment,
+        summary: sentiment.summary,
+      });
+    }
+
+    // Also include any existing articles from today that weren't newly added
+    if (tickerArticleSummaries.length === 0) {
+      try {
+        const existing = (await sql`
+          SELECT title, sentiment, summary FROM news_articles
+          WHERE ticker = ${ticker}
+            AND published_at >= NOW() - INTERVAL '7 days'
+          ORDER BY published_at DESC
+          LIMIT 20
+        `) as Array<{ title: string; sentiment: string | null; summary: string | null }>;
+        for (const row of existing) {
+          tickerArticleSummaries.push({ title: row.title, sentiment: row.sentiment, summary: row.summary });
+        }
+      } catch (e) {
+        console.warn(`[cron/news] Could not fetch existing articles for ${ticker} summary:`, e);
+      }
+    }
+
+    // Generate overall ticker summary if we have articles
+    if (tickerArticleSummaries.length > 0) {
+      await sleep(300);
+      const summary = await generateTickerSummary(ticker, companyName, tickerArticleSummaries);
+      totalInputTokens += summary.inputTokens;
+      totalOutputTokens += summary.outputTokens;
+      totalApiCalls++;
+
+      if (summary.overall_summary) {
+        try {
+          await sql`
+            INSERT INTO ticker_summaries (ticker, date, overall_summary, recommendation, risks, catalysts, updated_at)
+            VALUES (
+              ${ticker},
+              CURRENT_DATE,
+              ${summary.overall_summary},
+              ${summary.recommendation},
+              ${summary.risks},
+              ${summary.catalysts},
+              NOW()
+            )
+            ON CONFLICT (ticker, date)
+            DO UPDATE SET
+              overall_summary = EXCLUDED.overall_summary,
+              recommendation = EXCLUDED.recommendation,
+              risks = EXCLUDED.risks,
+              catalysts = EXCLUDED.catalysts,
+              updated_at = NOW()
+          `;
+        } catch (e) {
+          console.warn(`[cron/news] Failed to upsert ticker_summary for ${ticker}:`, e);
         }
       }
     }
@@ -149,6 +217,9 @@ export async function GET(req: NextRequest) {
 
       await sleep(200);
       const sentiment = await analyseArticle(article.ticker, companyName, article.title);
+      totalInputTokens += sentiment.inputTokens;
+      totalOutputTokens += sentiment.outputTokens;
+      totalApiCalls++;
 
       if (sentiment.sentiment !== null) {
         try {
@@ -173,12 +244,35 @@ export async function GET(req: NextRequest) {
     console.warn('[cron/news] Backfill query failed:', e);
   }
 
+  // Persist token usage for today
+  if (totalApiCalls > 0) {
+    try {
+      await sql`
+        INSERT INTO token_usage_log (date, input_tokens, output_tokens, api_calls, updated_at)
+        VALUES (CURRENT_DATE, ${totalInputTokens}, ${totalOutputTokens}, ${totalApiCalls}, NOW())
+        ON CONFLICT (date)
+        DO UPDATE SET
+          input_tokens = token_usage_log.input_tokens + EXCLUDED.input_tokens,
+          output_tokens = token_usage_log.output_tokens + EXCLUDED.output_tokens,
+          api_calls = token_usage_log.api_calls + EXCLUDED.api_calls,
+          updated_at = NOW()
+      `;
+    } catch (e) {
+      console.warn('[cron/news] Failed to upsert token_usage_log:', e);
+    }
+  }
+
   return NextResponse.json({
     tickersProcessed,
     articlesFound,
     articlesNew,
     articlesAnalysed,
     articlesBackfilled,
+    tokens: {
+      input: totalInputTokens,
+      output: totalOutputTokens,
+      apiCalls: totalApiCalls,
+    },
     completedAt: new Date().toISOString(),
   });
 }
