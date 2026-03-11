@@ -41,7 +41,20 @@ export interface TokenUsageRow extends TokenUsage {
 }
 
 export default async function NewsPage() {
-  const session = await getSession();
+  let session: Awaited<ReturnType<typeof getSession>>;
+  try {
+    session = await getSession();
+  } catch (e) {
+    console.error('[news] getSession() threw:', e instanceof Error ? e.constructor.name : typeof e, e instanceof Error ? e.message : String(e));
+    return (
+      <div className="min-h-screen bg-gray-950 flex items-center justify-center">
+        <div className="text-center">
+          <h1 className="text-2xl font-bold text-red-400 mb-2">Auth Error</h1>
+          <p className="text-gray-400">Session lookup failed: {e instanceof Error ? e.message : 'Unknown error'}</p>
+        </div>
+      </div>
+    );
+  }
   if (!session) redirect('/sign-in');
 
   if (!sql) {
