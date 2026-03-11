@@ -49,7 +49,7 @@ export async function analyseArticle(
           { role: 'user', content: userPrompt },
         ],
         temperature: 0.1,
-        max_tokens: 256,
+        max_completion_tokens: 256,
       }),
       signal: AbortSignal.timeout(15000),
     });
